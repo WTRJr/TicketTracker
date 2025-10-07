@@ -190,63 +190,138 @@ const TicketForm = ({
   onSave: (data: Partial<Ticket>) => void;
   onClose: () => void;
 }) => {
+  // Editable fields kept in local state when relevant
   const [title, setTitle] = useState(ticket?.title || '');
   const [description, setDescription] = useState(ticket?.description || '');
   const [status, setStatus] = useState<TicketStatus>(ticket?.status || 'Created');
+  const [rating, setRating] = useState<number | undefined>(ticket?.rating);
 
-  const canEditContent = !ticket || ticket.status === 'Created';
   const isEditing = !!ticket;
 
+  // Determine allowed edits based on ticket status (if creating, allow all)
+  // If not editing (creating new ticket), all fields allowed.
+  // If editing:
+  //  - Created => title, desc, status
+  //  - Under Assistance => status only
+  //  - Completed => rating only
+  const allowed = {
+    canEditTitle: !isEditing || ticket?.status === 'Created',
+    canEditDescription: !isEditing || ticket?.status === 'Created',
+    canEditStatus: !isEditing || ticket?.status === 'Created' || ticket?.status === 'Under Assistance',
+    canEditRating: !isEditing || ticket?.status === 'Completed',
+  };
+
+  // When opening the form for edit, ensure local state reflects the ticket's current values.
+  // (This helps when we reuse the form multiple times in a session)
+  React.useEffect(() => {
+    setTitle(ticket?.title || '');
+    setDescription(ticket?.description || '');
+    setStatus(ticket?.status || 'Created');
+    setRating(ticket?.rating);
+  }, [ticket]);
+
   const handleSubmit = () => {
-    if (!title.trim() || !description.trim()) return;
-    onSave({ title: title.trim(), description: description.trim(), status });
+    // Validate required fields for creation and for allowed edits:
+    if (!isEditing) {
+      // Creating a new ticket requires title & description
+      if (!title.trim() || !description.trim()) return;
+      onSave({ title: title.trim(), description: description.trim(), status: status || 'Created' });
+      onClose();
+      return;
+    }
+
+    // Editing: only send the fields that are permitted to change.
+    const payload: Partial<Ticket> = {};
+    if (allowed.canEditTitle) payload.title = title.trim();
+    if (allowed.canEditDescription) payload.description = description.trim();
+    if (allowed.canEditStatus) payload.status = status;
+    if (allowed.canEditRating) payload.rating = rating;
+
+    // If nothing changed, we still close silently
+    onSave(payload);
     onClose();
   };
 
   return (
     <View style={{ padding: SPACING.page }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.small }}>
-        <Text style={{ fontSize: TYPO.h1, fontWeight: '800', color: COLORS.text }}>{isEditing ? 'Edit Ticket' : 'New Ticket'}</Text>
+        <Text style={{ fontSize: TYPO.h1, fontWeight: '800', color: COLORS.text }}>
+          {isEditing ? 'Edit Ticket' : 'New Ticket'}
+        </Text>
         <TouchableOpacity onPress={onClose} style={{ padding: SPACING.tiny }}>
           <X size={20} color={COLORS.icon} />
         </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: SPACING.large }}>
+        {/* Title */}
         <View style={{ marginBottom: SPACING.small }}>
           <Text style={styles.label}>Title</Text>
-          <TextInput value={title} onChangeText={setTitle} editable={canEditContent} placeholder="Brief title" style={[styles.input, !canEditContent && styles.inputDisabled]} />
+          <TextInput
+            value={title}
+            onChangeText={setTitle}
+            editable={allowed.canEditTitle}
+            placeholder="Brief title"
+            style={[styles.input, !allowed.canEditTitle && styles.inputDisabled]}
+          />
         </View>
 
+        {/* Description */}
         <View style={{ marginBottom: SPACING.small }}>
           <Text style={styles.label}>Description</Text>
-          <TextInput value={description} onChangeText={setDescription} editable={canEditContent} placeholder="Detailed description" multiline numberOfLines={4} style={[styles.textarea, !canEditContent && styles.inputDisabled]} />
+          <TextInput
+            value={description}
+            onChangeText={setDescription}
+            editable={allowed.canEditDescription}
+            placeholder="Detailed description"
+            multiline
+            numberOfLines={4}
+            style={[styles.textarea, !allowed.canEditDescription && styles.inputDisabled]}
+          />
         </View>
 
-        {isEditing && (
+        {/* Status - appear when creating OR when editing and status change is allowed */}
+        {( !isEditing || allowed.canEditStatus ) && (
           <View style={{ marginBottom: SPACING.small }}>
             <Text style={styles.label}>Status</Text>
             <View style={{ flexDirection: 'row', gap: SPACING.small }}>
               {(['Created', 'Under Assistance', 'Completed'] as TicketStatus[]).map((s) => (
                 <TouchableOpacity
                   key={s}
-                  onPress={() => setStatus(s)}
+                  onPress={() => allowed.canEditStatus && setStatus(s)}
                   style={[
                     styles.statusOption,
                     status === s ? { borderColor: COLORS.primary } : { borderColor: COLORS.border },
+                    !allowed.canEditStatus && { opacity: 0.5 },
                   ]}
+                  disabled={!allowed.canEditStatus}
                 >
-                  <Text style={{ color: status === s ? COLORS.primary : COLORS.icon, fontWeight: status === s ? '700' : '600', fontSize: TYPO.body }}>{s}</Text>
+                  <Text style={{ color: status === s ? COLORS.primary : COLORS.icon, fontWeight: status === s ? '700' : '600', fontSize: TYPO.body }}>
+                    {s}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
           </View>
         )}
 
+        {/* Rating - show when editing a Completed ticket OR allow setting rating if creating (edge case) */}
+        { (isEditing && ticket?.status === 'Completed') && (
+          <View style={{ marginBottom: SPACING.small }}>
+            <Text style={styles.label}>Rating</Text>
+            <StarRating rating={rating} editable={true} onRate={(r) => setRating(r)} />
+            <Text style={{ color: COLORS.muted, fontSize: TYPO.small, marginTop: SPACING.tiny }}>
+              {rating ? `Selected: ${rating} / 5` : 'No rating yet'}
+            </Text>
+          </View>
+        )}
+
+        {/* Save / Cancel buttons */}
         <View style={{ flexDirection: 'row', gap: SPACING.small, marginTop: SPACING.small }}>
           <TouchableOpacity onPress={onClose} style={styles.btnCancel}>
             <Text style={{ color: COLORS.text, fontWeight: '700' }}>Cancel</Text>
           </TouchableOpacity>
+
           <TouchableOpacity onPress={handleSubmit} style={styles.btnCreate}>
             <Text style={{ color: 'white', fontWeight: '700' }}>{isEditing ? 'Save Changes' : 'Create Ticket'}</Text>
           </TouchableOpacity>
@@ -255,6 +330,7 @@ const TicketForm = ({
     </View>
   );
 };
+
 
 // Ticket Card 
 const TicketCard = ({
